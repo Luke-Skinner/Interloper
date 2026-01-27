@@ -8,6 +8,7 @@ from typing import Optional
 
 import httpx
 
+from app.cache import cache
 from app.config import settings
 from app.models import HotelResult
 from app.scrapers.base import BaseScraper
@@ -31,6 +32,12 @@ class BookingApiScraper(BaseScraper):
 
     async def _search_destination(self, city: str) -> Optional[str]:
         """Search for a destination ID by city name."""
+        # Check cache first
+        cached = await cache.get_destination(self.platform_name, city)
+        if cached:
+            logger.info(f"Cache HIT for destination: {city}")
+            return cached.get("dest_id"), cached.get("dest_type")
+
         client = await self.get_client()
 
         url = f"{self.BASE_URL}/v1/hotels/locations"
@@ -46,6 +53,14 @@ class BookingApiScraper(BaseScraper):
                 dest_id = data[0].get("dest_id")
                 dest_type = data[0].get("dest_type", "city")
                 logger.info(f"Found destination: {dest_id} (type: {dest_type})")
+
+                # Cache the result
+                await cache.set_destination(
+                    self.platform_name,
+                    city,
+                    {"dest_id": dest_id, "dest_type": dest_type},
+                )
+
                 return dest_id, dest_type
 
             logger.warning(f"No destination found for: {city}")

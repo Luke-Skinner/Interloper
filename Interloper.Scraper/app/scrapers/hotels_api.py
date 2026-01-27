@@ -8,6 +8,7 @@ from typing import Optional
 
 import httpx
 
+from app.cache import cache
 from app.config import settings
 from app.models import HotelResult
 from app.scrapers.base import BaseScraper
@@ -31,6 +32,12 @@ class HotelsApiScraper(BaseScraper):
 
     async def _search_destination(self, city: str) -> Optional[dict]:
         """Search for a destination by city name."""
+        # Check cache first
+        cached = await cache.get_destination(self.platform_name, city)
+        if cached:
+            logger.info(f"Cache HIT for Hotels.com destination: {city}")
+            return cached
+
         client = await self.get_client()
 
         url = f"{self.BASE_URL}/v2/regions"
@@ -52,7 +59,13 @@ class HotelsApiScraper(BaseScraper):
                 region = regions[0]
                 region_id = region.get("gaiaId") or region.get("regionId")
                 logger.info(f"Found Hotels.com region: {region_id}")
-                return {"region_id": region_id, "data": region}
+
+                result = {"region_id": region_id, "data": region}
+
+                # Cache the result
+                await cache.set_destination(self.platform_name, city, result)
+
+                return result
 
             logger.warning(f"No Hotels.com destination found for: {city}")
             return None
@@ -88,7 +101,8 @@ class HotelsApiScraper(BaseScraper):
 
         client = await self.get_client()
 
-        url = f"{self.BASE_URL}/v2/hotels/search"
+        # Use v3 endpoint for better data
+        url = f"{self.BASE_URL}/v3/hotels/search"
         params = {
             "region_id": region_id,
             "checkin_date": check_in.isoformat(),
@@ -101,21 +115,44 @@ class HotelsApiScraper(BaseScraper):
         }
 
         try:
-            logger.info(f"Searching Hotels.com in {city} (region: {region_id})")
+            logger.info(f"Searching Hotels.com v3 in {city} (region: {region_id})")
             response = await client.get(url, params=params)
             response.raise_for_status()
             data = response.json()
 
-            # Parse hotels from response - the correct key is 'properties'
-            properties = data.get("properties", [])
+            # Log response structure for debugging
+            if isinstance(data, dict):
+                logger.info(f"Hotels.com v3 response keys: {list(data.keys())}")
+                # Check nested data structure
+                if "data" in data:
+                    inner_data = data.get("data", {})
+                    if isinstance(inner_data, dict):
+                        logger.info(f"Hotels.com v3 data keys: {list(inner_data.keys())}")
+
+            # Parse hotels from response - v3 may nest under 'data'
+            properties = []
+            if "data" in data:
+                inner = data.get("data", {})
+                if isinstance(inner, dict):
+                    properties = inner.get("properties", [])
+                    if not properties:
+                        properties = inner.get("hotels", [])
+                    if not properties:
+                        properties = inner.get("propertySearch", {}).get("properties", [])
             if not properties:
-                # propertySearchListings may only have __typename due to API tier limitations
-                # Log for debugging but don't use these incomplete objects
-                listings = data.get("propertySearchListings", [])
-                if listings:
-                    logger.debug(f"Hotels.com propertySearchListings has {len(listings)} items (may be incomplete)")
+                properties = data.get("properties", [])
+            if not properties:
+                properties = data.get("hotels", [])
+            if not properties:
+                properties = data.get("results", [])
 
             logger.info(f"Hotels.com API returned {len(properties)} hotels")
+
+            # Log first property structure for debugging
+            if properties and len(properties) > 0:
+                first = properties[0]
+                if isinstance(first, dict):
+                    logger.info(f"Hotels.com first property keys: {list(first.keys())}")
 
             for prop in properties:
                 try:
@@ -139,6 +176,7 @@ class HotelsApiScraper(BaseScraper):
 
         except httpx.HTTPStatusError as e:
             logger.error(f"HTTP error searching Hotels.com: {e.response.status_code}")
+            logger.error(f"Response body: {e.response.text}")
             if e.response.status_code == 429:
                 logger.error("Rate limit exceeded for Hotels.com")
             elif e.response.status_code == 403:
@@ -150,7 +188,7 @@ class HotelsApiScraper(BaseScraper):
         return results
 
     def _parse_hotel(self, prop: dict, city: str) -> Optional[HotelResult]:
-        """Parse a hotel/property from the API response."""
+        """Parse a hotel/property from the v3 API response."""
         try:
             hotel_id = str(prop.get("id", ""))
             name = prop.get("name", "")
@@ -158,47 +196,56 @@ class HotelsApiScraper(BaseScraper):
             if not hotel_id or not name:
                 return None
 
-            # Extract price
+            # Extract price from v3 structure
             price = None
             price_info = prop.get("price", {})
-            lead_price = price_info.get("lead", {}).get("amount")
-            if lead_price:
-                price = Decimal(str(lead_price))
+            # v3 structure: price.lead.amount or price.displayMessages
+            lead = price_info.get("lead", {})
+            if isinstance(lead, dict):
+                lead_amount = lead.get("amount")
+                if lead_amount:
+                    price = Decimal(str(lead_amount))
 
-            # Also try options array
+            # Also try strikeOut or formatted price
             if not price:
-                options = price_info.get("options", [])
-                if options:
-                    first_option = options[0]
-                    base_rate = first_option.get("baseRate")
-                    if base_rate:
-                        price = Decimal(str(base_rate))
+                strike = price_info.get("strikeOut", {})
+                if isinstance(strike, dict):
+                    strike_amount = strike.get("amount")
+                    if strike_amount:
+                        price = Decimal(str(strike_amount))
 
-            # Extract rating (Hotels.com uses 0-10 scale)
+            # Extract rating from guestRating (v3 structure)
             rating = None
-            reviews = prop.get("reviews", {})
-            score = reviews.get("score")
-            if score:
-                rating = self._normalize_rating(float(score), max_rating=10.0)
+            guest_rating = prop.get("guestRating", {})
+            if isinstance(guest_rating, dict):
+                score = guest_rating.get("rating")
+                if score:
+                    # Hotels.com uses 0-10 scale
+                    rating = self._normalize_rating(float(score), max_rating=10.0)
 
             # Extract review count
-            review_count = reviews.get("total")
+            review_count = None
+            if isinstance(guest_rating, dict):
+                review_count = guest_rating.get("totalCount")
 
-            # Build booking URL
-            booking_url = f"https://www.hotels.com/ho{hotel_id}"
+            # Build booking URL from link or construct it
+            link_info = prop.get("link", {})
+            if isinstance(link_info, dict):
+                booking_url = link_info.get("uri", f"https://www.hotels.com/ho{hotel_id}")
+                if booking_url and not booking_url.startswith("http"):
+                    booking_url = f"https://www.hotels.com{booking_url}"
+            else:
+                booking_url = f"https://www.hotels.com/ho{hotel_id}"
 
-            # Extract address
-            neighborhood = prop.get("neighborhood", {})
-            address = neighborhood.get("name", "")
-
-            # Extract image
+            # Extract image from mediaSection
             image_url = None
-            images = prop.get("propertyImage", {})
-            image_data = images.get("image", {})
-            image_url = image_data.get("url", "")
-
-            # Star rating
-            star_info = prop.get("star")
+            media_section = prop.get("mediaSection", {})
+            if isinstance(media_section, dict):
+                gallery = media_section.get("gallery", {})
+                if isinstance(gallery, dict):
+                    images = gallery.get("media", [])
+                    if images and len(images) > 0:
+                        image_url = images[0].get("url", "")
 
             return HotelResult(
                 platform=self.platform_name,
@@ -208,7 +255,7 @@ class HotelsApiScraper(BaseScraper):
                 currency="USD",
                 rating=rating,
                 review_count=int(review_count) if review_count else None,
-                address=address,
+                address="",  # v3 doesn't include address in search results
                 city=city,
                 booking_url=booking_url,
                 image_url=image_url if image_url else None,
@@ -216,6 +263,7 @@ class HotelsApiScraper(BaseScraper):
 
         except Exception as e:
             logger.warning(f"Error parsing Hotels.com data: {e}")
+            logger.debug(f"Property data: {prop}")
             return None
 
     def _has_free_cancellation(self, prop: dict) -> bool:

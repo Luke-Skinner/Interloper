@@ -1,9 +1,11 @@
 import asyncio
 import logging
 from contextlib import asynccontextmanager
+from decimal import Decimal
 
 from fastapi import FastAPI, HTTPException
 
+from app.cache import cache
 from app.config import settings
 from app.models import HealthResponse, SearchRequest, SearchResponse
 from app.scrapers import scraper_registry
@@ -21,9 +23,19 @@ async def lifespan(app: FastAPI):
     """Application lifespan handler."""
     logger.info(f"Starting {settings.app_name} v{settings.app_version}")
     logger.info(f"Available platforms: {scraper_registry.get_platforms()}")
+
+    # Connect to Redis cache
+    await cache.connect()
+    if cache.is_connected:
+        logger.info("Redis cache enabled")
+    else:
+        logger.warning("Redis cache disabled - running without caching")
+
     yield
+
     # Cleanup
-    logger.info("Shutting down scrapers...")
+    logger.info("Shutting down...")
+    await cache.disconnect()
     await scraper_registry.close_all()
 
 
@@ -105,8 +117,8 @@ async def search_hotels(request: SearchRequest):
     for results in results_lists:
         all_results.extend(results)
 
-    # Sort by price
-    all_results.sort(key=lambda x: x.price)
+    # Sort by price (put hotels without price at the end)
+    all_results.sort(key=lambda x: (x.price is None, x.price or Decimal("999999")))
 
     logger.info(f"Search complete: {len(all_results)} results from {platforms_searched}")
 

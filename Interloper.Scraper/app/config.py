@@ -18,6 +18,13 @@ class Settings(BaseSettings):
     # RapidAPI Configuration
     rapidapi_key: str = ""
 
+    # Redis Configuration
+    redis_url: str = "redis://localhost:6379"
+
+    # Cache TTLs (in seconds)
+    cache_destination_ttl: int = 86400  # 24 hours - destinations rarely change
+    cache_search_ttl: int = 300  # 5 minutes - prices change frequently
+
     class Config:
         env_file = ".env"
         env_file_encoding = "utf-8"

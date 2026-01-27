@@ -46,6 +46,9 @@ services:
       - REQUEST_DELAY_SECONDS=${REQUEST_DELAY_SECONDS:-1.0}
       - MAX_CONCURRENT_REQUESTS=${MAX_CONCURRENT_REQUESTS:-3}
       - RAPIDAPI_KEY=${RAPIDAPI_KEY:-}
+      - REDIS_URL=redis://redis:6379
+    depends_on:
+      - redis
     healthcheck:
       test: ["CMD", "curl", "-f", "http://localhost:8000/health"]
       interval: 30s

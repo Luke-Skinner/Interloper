@@ -35,7 +35,7 @@ class HotelResult(BaseModel):
     platform: str = Field(..., description="Source platform (e.g., 'booking')")
     hotel_id: str = Field(..., description="Platform-specific hotel ID")
     name: str = Field(..., description="Hotel name")
-    price: Decimal = Field(..., description="Price per night")
+    price: Optional[Decimal] = Field(default=None, description="Price per night")
     currency: str = Field(default="USD", description="Currency code")
     total_price: Optional[Decimal] = Field(
         default=None, description="Total price for the stay"

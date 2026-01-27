@@ -5,6 +5,7 @@ from app.config import settings
 from .base import BaseScraper
 from .booking_api import BookingApiScraper
 from .hotels_api import HotelsApiScraper
+from .priceline_api import PricelineApiScraper
 
 logger = logging.getLogger(__name__)
 
@@ -21,6 +22,7 @@ class ScraperRegistry:
         if settings.rapidapi_key:
             self.register(BookingApiScraper())
             self.register(HotelsApiScraper())
+            self.register(PricelineApiScraper())
             logger.info("Registered API-based scrapers (RapidAPI key configured)")
         else:
             logger.warning("RAPIDAPI_KEY not configured - no scrapers available")
