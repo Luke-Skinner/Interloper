@@ -57,7 +57,7 @@ public class HotelResult
     public string Platform { get; set; } = string.Empty;
     public string HotelId { get; set; } = string.Empty;
     public string Name { get; set; } = string.Empty;
-    public decimal Price { get; set; }
+    public decimal? Price { get; set; }
     public decimal? TotalPrice { get; set; }
     public decimal? Rating { get; set; }
     public int? ReviewCount { get; set; }

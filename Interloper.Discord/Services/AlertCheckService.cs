@@ -57,6 +57,13 @@ public class AlertCheckService
         }
     }
 
+    // Process a single alert (for manual triggering)
+    public async Task ProcessSingleAlertAsync(Alert alert)
+    {
+        _logger.LogInformation("Manual check triggered for alert {AlertId}", alert.Id);
+        await ProcessAlertAsync(alert);
+    }
+
     // Process a single alert
     private async Task ProcessAlertAsync(Alert alert)
     {
@@ -126,11 +133,11 @@ public class AlertCheckService
         // Convert scraper results to HotelDeal objects
         // Only include hotels that are actually below the max price
         return response.Hotels
-            .Where(h => h.Price <= alert.MaxPrice)
+            .Where(h => h.Price.HasValue && h.Price <= alert.MaxPrice)
             .Select(h => new HotelDeal
             {
                 HotelName = h.Name,
-                Price = h.Price,
+                Price = h.Price!.Value,
                 Platform = h.Platform,
                 Rating = h.Rating,
                 BookingUrl = h.BookingUrl,

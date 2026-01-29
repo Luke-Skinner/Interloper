@@ -21,6 +21,7 @@ public class ScraperApiClient : IScraperApiClient
         {
             PropertyNamingPolicy = JsonNamingPolicy.SnakeCaseLower,
             DefaultIgnoreCondition = JsonIgnoreCondition.WhenWritingNull,
+            NumberHandling = JsonNumberHandling.AllowReadingFromString,
         };
     }
 
@@ -176,7 +177,7 @@ internal class ScraperApiHotel
     public string? Platform { get; set; }
     public string? HotelId { get; set; }
     public string? Name { get; set; }
-    public decimal Price { get; set; }
+    public decimal? Price { get; set; }
     public decimal? TotalPrice { get; set; }
     public decimal? Rating { get; set; }
     public int? ReviewCount { get; set; }

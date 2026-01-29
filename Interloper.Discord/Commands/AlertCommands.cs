@@ -2,6 +2,7 @@ using Discord;
 using Discord.Interactions;
 using Interloper.Core.Interfaces;
 using Interloper.Core.Models;
+using Interloper.Discord.Services;
 using Microsoft.Extensions.Logging;
 
 namespace Interloper.Discord.Commands;
@@ -12,15 +13,18 @@ public class AlertCommands : InteractionModuleBase<SocketInteractionContext>
     private readonly ILogger<AlertCommands> _logger;
     private readonly IAlertRepository _alertRepository;
     private readonly IUserRepository _userRepository;
+    private readonly AlertCheckService _alertCheckService;
 
     public AlertCommands(
         ILogger<AlertCommands> logger,
         IAlertRepository alertRepository,
-        IUserRepository userRepository)
+        IUserRepository userRepository,
+        AlertCheckService alertCheckService)
     {
         _logger = logger;
         _alertRepository = alertRepository;
         _userRepository = userRepository;
+        _alertCheckService = alertCheckService;
     }
 
     [SlashCommand("alert-create", "Create a new hotel price alert")]
@@ -336,6 +340,37 @@ public class AlertCommands : InteractionModuleBase<SocketInteractionContext>
         {
             _logger.LogError(ex, "Error deleting alert {AlertId}", alertId);
             await FollowupAsync("An error occurred while deleting the alert.", ephemeral: true);
+        }
+    }
+
+    [SlashCommand("alert-check", "Manually trigger a check for an alert")]
+    public async Task CheckAlertAsync(
+        [Summary("id", "Alert ID (first 8 characters)")] string alertId)
+    {
+        try
+        {
+            var alert = await FindAlertByPartialIdAsync(alertId);
+
+            if (alert == null)
+            {
+                await FollowupAsync("Alert not found.", ephemeral: true);
+                return;
+            }
+
+            if (alert.UserId != (long)Context.User.Id)
+            {
+                await FollowupAsync("You can only check your own alerts.", ephemeral: true);
+                return;
+            }
+
+            await FollowupAsync($"Checking alert `{alertId}` now. You'll receive a DM if deals are found.", ephemeral: true);
+
+            await _alertCheckService.ProcessSingleAlertAsync(alert);
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex, "Error checking alert {AlertId}", alertId);
+            await FollowupAsync("An error occurred while checking the alert.", ephemeral: true);
         }
     }
 
