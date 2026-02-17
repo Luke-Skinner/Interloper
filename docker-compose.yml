@@ -33,6 +33,24 @@ services:
       timeout: 5s
       retries: 5
 
+  bot:
+    build:
+      context: .
+      dockerfile: Interloper.Discord/Dockerfile
+    container_name: interloper-bot
+    restart: unless-stopped
+    environment:
+      - DISCORD_BOT_TOKEN=${DISCORD_BOT_TOKEN}
+      - DISCORD_CLIENT_ID=${DISCORD_CLIENT_ID}
+      - DISCORD_GUILD_ID=${DISCORD_GUILD_ID:-}
+      - DATABASE_CONNECTION_STRING=Host=postgres;Port=5432;Database=hotelbot;Username=postgres;Password=${POSTGRES_PASSWORD:-postgres123}
+      - SCRAPER_API_URL=http://scraper:8000
+    depends_on:
+      postgres:
+        condition: service_healthy
+      scraper:
+        condition: service_healthy
+
   scraper:
     build:
       context: ./Interloper.Scraper

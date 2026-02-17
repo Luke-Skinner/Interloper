@@ -1,0 +1,10 @@
+**/bin/
+**/obj/
+**/.vs/
+**/logs/
+**/*.user
+.env
+.git
+nul
+**/__pycache__/
+**/*.pyc

@@ -1,0 +1,55 @@
+name: Deploy to AWS
+
+on:
+  push:
+    branches: [main]
+
+env:
+  AWS_REGION: us-west-2
+  BOT_REPO: interloper/bot
+  SCRAPER_REPO: interloper/scraper
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Configure AWS credentials
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
+          aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+          aws-region: ${{ env.AWS_REGION }}
+
+      - name: Login to Amazon ECR
+        id: ecr-login
+        uses: aws-actions/amazon-ecr-login@v2
+
+      - name: Build and push bot image
+        env:
+          REGISTRY: ${{ steps.ecr-login.outputs.registry }}
+          IMAGE_TAG: ${{ github.sha }}
+        run: |
+          docker build -t $REGISTRY/$BOT_REPO:$IMAGE_TAG -t $REGISTRY/$BOT_REPO:latest -f Interloper.Discord/Dockerfile .
+          docker push $REGISTRY/$BOT_REPO:$IMAGE_TAG
+          docker push $REGISTRY/$BOT_REPO:latest
+
+      - name: Build and push scraper image
+        env:
+          REGISTRY: ${{ steps.ecr-login.outputs.registry }}
+          IMAGE_TAG: ${{ github.sha }}
+        run: |
+          docker build -t $REGISTRY/$SCRAPER_REPO:$IMAGE_TAG -t $REGISTRY/$SCRAPER_REPO:latest -f Interloper.Scraper/Dockerfile ./Interloper.Scraper
+          docker push $REGISTRY/$SCRAPER_REPO:$IMAGE_TAG
+          docker push $REGISTRY/$SCRAPER_REPO:latest
+
+      - name: Deploy bot to ECS
+        run: |
+          aws ecs update-service --cluster interloper-cluster --service bot --force-new-deployment
+
+      - name: Deploy scraper to ECS
+        run: |
+          aws ecs update-service --cluster interloper-cluster --service scraper --force-new-deployment
